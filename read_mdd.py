@@ -328,13 +328,14 @@ class MDMDocument:
 
         try:
 
-            result = None
+            result = []
 
             config = self.__config
             document = self.__document
 
             for routing_part in ['Web']: # ??? TODO:
-                result = '{val}'.format(val=document.Routing.Script)
+                val = '{val}'.format(val=document.Routing.Script)
+                result.append({'name':routing_part,'value':val})
 
             return result
         
@@ -364,7 +365,6 @@ class MDMDocument:
                     #langcode = read_feature[9:]
                     for langcode in self.__translations:
                         #val_label = '{val}'.format(val=item.Labels["Label"].Text["Question"][langcode])
-                        # TODO:
                         val_label = '{val}'.format(val='???')
                         # item.Labels('Question','ENU')
                         try:
