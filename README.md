@@ -1,2 +1,2 @@
 # MDD-read-py
-read MDD files in python
+Read MDD files in python
