@@ -1,9 +1,10 @@
 ## Ignore everything in this directory
 # *
 *.mdd
+*.ddf
 **/[Tt]est*
 ref.py
-Test.py
+**/__pycache__/
 report.*
 # Except this file
 !.gitignore
