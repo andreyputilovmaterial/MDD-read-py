@@ -11,11 +11,41 @@ import json
 import win32com.client
 
 
+# # TODO:
+# import pdb
 
 
+
+def normaize_linebreaks(s):
+    return re.sub(r'(?:(?:\r)|(?:\n))+',"\n",s)
+
+
+
+
+# how to use this class
+# 1. create an object of type MDMDocument (and pass the path to MDD as a param)
+# the MDD is opened as a file system object, so the connection is made to the file (descriptor is acquired)
+# also, the third param is to pass config options - which properties to read (for example, just labes, or translations too), which sections, etc...
+# I don't have cofig options documented, please read through source code to understand config power
+# 2. call "read"
+# so the program iterates over all fields
+# and returns result as dict that can be represented as json
+# that's it, enjoy
+
+# when done, file descriptor is released (this is also happening on exceptions because it is specced in __del__ method)
 
 class MDMDocument:
     
+
+    # constructor: load MDD document here
+    # three params:
+    # 1. the path to MDD,
+    # 2. and an optional method to read: "open" or "join";
+    #    both are working options, just different methods used;
+    #    I am not sure which method is better
+    #    as we know, FileTrimmer scripts are using the "join" method
+    #    and PrepData transfomrations too
+    # 3. config options (I don't have cofig options documented, please read through source code to understand config power)
     def __init__(self,mdd_path,method='open',config={}):
 
         self.__document = None
@@ -38,31 +68,86 @@ class MDMDocument:
         
         self.__mdd_path = mdd_path
         self.__read_datetime = datetime.now()
+        # config is initialized here if it was not passed from above; the default config is passed and is set below! Do not update here! Like, you can update here, but anyway it is passed from below!
         config_default = {
-            'features': ['label','properties','translations'], # ,'scripting'],
+            'features': ['label','attributes','properties','translations','scripting'],
             'contexts': ['Question','Analysis']
         }
         self.__config = { **config_default, **config }
     
+
+
+    # unlink document if some error happened, or if we are done processing it
     def __del__(self):
         self.__document.Close()
         print('MDM document closed')
+
+
+
+    # strange methods required by python so that I can use "with"
+    # I still don't understand why this is needed as we already have __init__ and __del__ and allll should work, why on Earth __enter__ and __exit__ are necessary????
+    def __enter__(self):
+        return self    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
     
+
+
+    # actually the main method of this class
+    # reads the entire MDD and return it as a "report"
+    # return type is dict that is suitable to be saved or sent as json
     def read(self):
-        self.__translations = [ '{langcode}'.format(langcode=langcode) for langcode in self.__document.Languages ]
+
+        # prep some variables - list of languages, list of features, columns, etc
+        translations_list = [ '{langcode}'.format(langcode=langcode) for langcode in self.__document.Languages ]
+        self.__translations = translations_list
+        flags_list = []
+        columns_list = ['name']
+        for feature_spec in self.__config['features']:
+            col_add = None
+            if feature_spec=='label':
+                col_add = 'label'
+            elif feature_spec=='attributes':
+                col_add = 'attributes'
+            elif feature_spec=='properties':
+                col_add = 'properties'
+            elif feature_spec=='scripting':
+                col_add = 'scripting'
+            elif feature_spec=='translations':
+                col_add = None # TODO: not super beautiful design sorry
+                for langcode in translations_list:
+                    columns_list.append('langcode-{langcode}'.format(langcode=langcode))
+            else:
+                raise Exception('feature type is not recognized: "{ft}"'.format(ft=feature_spec))
+            if  col_add:
+                columns_list.append(col_add)
+        
+        # ok, here's the final result
+        # that's what we return
         result = {
-            'MDD': self.__mdd_path,
-            'run_time_utc': self.__read_datetime.replace(tzinfo=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'run_time_local': self.__read_datetime.strftime('%Y-%m-%dT%H:%M:%SZ'),
-            'properties': self.__read_properties(),
-            'languages': self.__read_languages(),
-            'types': self.__read_sharedlists(),
-            'fields': self.__read_fields(self.__document.Fields),
-            'pages': self.__read_pages(),
-            'routing': self.__read_routing()
+            'report_type': 'MDD',
+            'source_file': '{path}'.format(path=self.__mdd_path),
+            'report_datetime_utc': self.__read_datetime.astimezone(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'report_datetime_local': self.__read_datetime.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            'source_file_metadata': [
+                { 'name': 'MDD', 'value': '{path}'.format(path=self.__mdd_path) },
+            ],
+            'report_scheme': {
+                'columns': columns_list,
+                'flags': flags_list
+            },
+            'sections': [
+                { 'name': 'mdmproperties', 'content': [{'name':'MDM','properties':self.__read_properties()}] },
+                { 'name': 'languages', 'content': self.__read_languages() },
+                { 'name': 'shared_lists', 'content': self.__read_sharedlists() },
+                { 'name': 'fields', 'content': self.__read_fields(self.__document.Fields) },
+                { 'name': 'pages', 'content': self.__read_pages() },
+                { 'name': 'routing', 'content': self.__read_routing() },
+            ],
         }
         return result
     
+    # and individual methods to follow: to read through all properties, all shared lists, all fields, categories, pages, etc...
     def __read_properties(self):
         
         try:
@@ -74,6 +159,8 @@ class MDMDocument:
 
             for read_feature in config['features']:
                 if read_feature=='label':
+                    pass
+                elif read_feature=='attributes':
                     pass
                 elif read_feature=='properties':
                     item = document
@@ -106,9 +193,11 @@ class MDMDocument:
             document = self.__document
 
             for item in document.Languages:
+                result_part = {'name':'{name}'.format(name=item.Name)}
                 for read_feature in config['features']:
                     if read_feature=='label':
-                        result.append(item.LongName)
+                        result_part['label'] = '{val}'.format(val=item.LongName)
+                result.append(result_part)
 
             return result
         
@@ -133,21 +222,19 @@ class MDMDocument:
                 result_item = {
                     **{
                         'name': sl_name,
-                        'elements': [],
+                        # 'elements': [],
                     },
                     **self.__read_mdm_item(item)
                 }
-                for cat in item.Elements:
-                    cat_name = '{name}'.format(name=cat.Name)
-                    result_item['elements'].append({
-                    **{
-                        'name': cat_name
-                    },
-                    **self.__read_mdm_item(cat)
-                })
                 result.append(
                     result_item
                 )
+                result_item = None
+                for cat in item.Elements:
+                    #cat_name = '{name}'.format(name=cat.Name)
+                    element_item = self.__read_mdm_item(cat)
+                    element_item['name'] = '{prefix}.categories[{itemname}]'.format(prefix=sl_name,itemname=element_item['name'])
+                    result.append( element_item )
 
             return result
         
@@ -176,17 +263,15 @@ class MDMDocument:
                     },
                     **self.__read_mdm_item(item)
                 }
-                for cat in item:
-                    cat_name = '{name}'.format(name=cat.Name)
-                    result_item['fields'].append({
-                    **{
-                        'name': cat_name
-                    },
-                    **self.__read_mdm_item(cat)
-                })
                 result.append(
                     result_item
                 )
+                result_item = None
+                for cat in item:
+                    #cat_name = '{name}'.format(name=cat.Name)
+                    item_add = self.__read_mdm_item(cat)
+                    item_add['name'] = '{prefix}.{name}'.format(prefix=item_name,name=item_add['name'])
+                    result.append(item_add)
 
             return result
         
@@ -208,9 +293,8 @@ class MDMDocument:
                 try:
                     item = fields[item_name]
                     result_item = self.__read_process_field(item)
-                    result.append(
-                        result_item
-                    )
+                    #result.append( result_item )
+                    result = result + result_item
 
                 except Exception as e:
                     print('failed when processing "{name}"'.format(name=item_name))
@@ -225,85 +309,92 @@ class MDMDocument:
     def __read_process_field(self,item):
 
         item_name = item.Name
+        result_other_items = []
         try:
 
             result_item = {
                 **{
-                    'name': '{name}'.format(name=item.Name),
-                    'object_type_value': item.ObjectTypeValue,
-                    #'data_type': item.DataType,
-                    #'is_grid': item.IsGrid,
+                    'name': '{name}'.format(name=item_name),
+                    'attributes': {
+                        'object_type_value': item.ObjectTypeValue,
+                        #'data_type': item.DataType,
+                        #'is_grid': item.IsGrid,
+                    },
                 },
                 **self.__read_mdm_item(item)
             }
             object_type_value = item.ObjectTypeValue
             if object_type_value==0:
                 # regular variable
-                result_item['type'] = 'plain'
+                result_item['attributes']['type'] = 'plain'
                 data_type = item.DataType
-                result_item['data_type'] = data_type
+                result_item['attributes']['data_type'] = data_type
                 if data_type==0:
                     # info
-                    result_item['type'] = 'plain/info'
+                    result_item['attributes']['type'] = 'plain/info'
                 elif data_type==1:
                     # long
-                    result_item['type'] = 'plain/long'
-                    result_item['minvalue'] = item.MinValue
-                    result_item['maxvalue'] = item.MaxValue
+                    result_item['attributes']['type'] = 'plain/long'
+                    result_item['attributes']['minvalue'] = item.MinValue
+                    result_item['attributes']['maxvalue'] = item.MaxValue
                 elif data_type==2:
                     # text
-                    result_item['type'] = 'plain/text'
-                    result_item['minvalue'] = item.MinValue
-                    result_item['maxvalue'] = item.MaxValue
+                    result_item['attributes']['type'] = 'plain/text'
+                    result_item['attributes']['minvalue'] = item.MinValue
+                    result_item['attributes']['maxvalue'] = item.MaxValue
                 elif data_type==3:
                     # categorical
-                    result_item['type'] = 'plain/categorical'
-                    result_item['minvalue'] = item.MinValue
-                    result_item['maxvalue'] = item.MaxValue
-                    result_item['categories'] = []
+                    result_item['attributes']['type'] = 'plain/categorical'
+                    result_item['attributes']['minvalue'] = item.MinValue
+                    result_item['attributes']['maxvalue'] = item.MaxValue
                     for cat in item.Categories:
-                        result_item['categories'].append(self.__read_mdm_item(cat))
+                        item_add = self.__read_mdm_item(cat)
+                        item_add['name'] = '{prefix}.categories[{name}]'.format(prefix=item_name,name=item_add['name'])
+                        result_other_items.append(item_add)
                 elif data_type==5:
                     # date
-                    result_item['type'] = 'plain/date'
+                    result_item['attributes']['type'] = 'plain/date'
                 elif data_type==6:
                     # double
-                    result_item['type'] = 'plain/double'
-                    result_item['minvalue'] = item.MinValue
-                    result_item['maxvalue'] = item.MaxValue
+                    result_item['attributes']['type'] = 'plain/double'
+                    result_item['attributes']['minvalue'] = item.MinValue
+                    result_item['attributes']['maxvalue'] = item.MaxValue
                 elif data_type==7:
                     # boolean
-                    result_item['type'] = 'plain/boolean'
+                    result_item['attributes']['type'] = 'plain/boolean'
                 pass
             elif object_type_value==1:
                 # array (loop)
-                result_item['type'] = 'array'
-                result_item['is_grid'] = item.IsGrid
-                result_item['categories'] = []
+                result_item['attributes']['type'] = 'array'
+                result_item['attributes']['is_grid'] = item.IsGrid
                 for cat in item.Categories:
-                    result_item['categories'].append(self.__read_mdm_item(cat))
-                result_item['fields'] = []
+                        item_add = self.__read_mdm_item(cat)
+                        item_add['name'] = '{prefix}.categories[{name}]'.format(prefix=item_name,name=item_add['name'])
+                        result_other_items.append(item_add)
                 for cat in item.Fields:
-                    result_item['fields'].append(self.__read_process_field(cat))
+                    #result_item['attributes']['fields'].append(self.__read_process_field(cat))
+                    result_other_items = result_other_items + [ {**item,'name':'{prefix}.{part}'.format(prefix=item_name,part=item['name'])} for item in self.__read_process_field(cat) ]
             elif object_type_value==2:
                 # Grid (it seems it's something different than Array, but I can't understand their logic; maybe it's different because it has a different db setup in case data, I don't know)
                 # Execute Error: The '<Object>.IGrid' type does not support the 'categories' property
-                result_item['type'] = 'grid'
-                result_item['is_grid'] = item.IsGrid
-                result_item['categories'] = []
+                result_item['attributes']['type'] = 'grid'
+                result_item['attributes']['is_grid'] = item.IsGrid
                 for cat in item.Elements:
-                    result_item['categories'].append(self.__read_mdm_item(cat))
-                result_item['fields'] = []
+                        item_add = self.__read_mdm_item(cat)
+                        item_add['name'] = '{prefix}.categories[{name}]'.format(prefix=item_name,name=item_add['name'])
+                        result_other_items.append(item_add)
                 for cat in item.Fields:
-                    result_item['fields'].append(self.__read_process_field(cat))
+                    #result_item['attributes']['fields'].append(self.__read_process_field(cat))
+                    result_other_items = result_other_items + [ {**item,'name':'{prefix}.{part}'.format(prefix=item_name,part=item['name'])} for item in self.__read_process_field(cat) ]
             elif object_type_value==3:
                 # class (block)
-                result_item['type'] = 'block'
-                result_item['fields'] = []
+                result_item['attributes']['type'] = 'block'
+                result_item['attributes']['fields'] = []
                 for cat in item.Fields:
-                    result_item['fields'].append(self.__read_process_field(cat))
+                    #result_item['attributes']['fields'].append(self.__read_process_field(cat))
+                    result_other_items = result_other_items + [ {**item,'name':'{prefix}.{part}'.format(prefix=item_name,part=item['name'])} for item in self.__read_process_field(cat) ]
             elif object_type_value==16:
-                result_item['type'] = 'plain16'
+                result_item['attributes']['type'] = 'plain/type16'
                 # not sure what is it, an example is Respondent.Serial (in some projects)
                 pass
             else:
@@ -316,7 +407,14 @@ class MDMDocument:
             #     },
             #     **self.__read_mdm_item(cat)
             # })
-            return result_item
+
+            # we need to reformat attributes collection
+            attributes_upd = []
+            for itemKey in result_item['attributes'].keys():
+                attributes_upd.append({'name':itemKey,'value':'{val}'.format(val=result_item['attributes'][itemKey])})
+            result_item['attributes'] = attributes_upd
+
+            return [result_item] + result_other_items
         
         except Exception as e:
             print('failed when processing "{name}"'.format(name=item_name))
@@ -331,9 +429,9 @@ class MDMDocument:
             config = self.__config
             document = self.__document
 
-            for routing_part in ['Web']: # ??? TODO:
+            for routing_part in ['DefaultRoutingContext']:
                 val = '{val}'.format(val=document.Routing.Script)
-                result.append({'name':routing_part,'value':val})
+                result.append({'name':routing_part,'label':val})
 
             return result
         
@@ -358,6 +456,8 @@ class MDMDocument:
                 if read_feature=='label':
                     val_label = '{val}'.format(val=item.Label)
                     result[read_feature] = val_label
+                elif read_feature=='attributes':
+                    pass
                 elif read_feature=='translations':
                 #elif read_feature[:9]=='langcode-':
                     #langcode = read_feature[9:]
@@ -413,15 +513,23 @@ if __name__ == '__main__':
     parser.add_argument(
         '-1',
         '--mdd',
-        metavar='p123456.mdd',
         help='Input MDD',
         required=True
     )
     parser.add_argument(
-        '-2',
         '--method',
-        metavar='open',
+        default='open',
         help='Method',
+        required=False
+    )
+    parser.add_argument(
+        '--config-features',
+        help='Config: list features (default is label,properties,translations)',
+        required=False
+    )
+    parser.add_argument(
+        '--config-contexts',
+        help='Config: list contexts (default is Question,Analysis)',
         required=False
     )
     args = parser.parse_args()
@@ -433,19 +541,27 @@ if __name__ == '__main__':
 
     method = '{arg}'.format(arg=args.method) if args.method else 'open'
 
+    config = {
+        # 'features': ['label','attributes','properties','translations'], # ,'scripting'],
+        'features': ['label','attributes','properties','translations','scripting'],
+        'contexts': ['Question','Analysis']
+    }
+    if args.config_features:
+        config['features'] = args.config_features.split(',')
+    if args.config_contexts:
+        config['contexts'] = args.config_contexts.split(',')
+
     print('MDM read script: script started at {dt}'.format(dt=time_start))
 
-    MDMDocument = MDMDocument(inp_mdd,method)
+    with MDMDocument(inp_mdd,method,config) as doc:
 
-    result = MDMDocument.read()
-    
-    result_json = json.dumps(result, indent=4)
-    result_json_fname = re.sub(r'^\s*?(.*?)\s*?$',lambda m: '{base}{added}'.format(base=m[1],added='.json'),'{path}'.format(path=inp_mdd))
-    print('MDM read script: saving as "{fname}"'.format(fname=result_json_fname))
-    with open(result_json_fname, "w") as outfile:
-        outfile.write(result_json)
-
-    del MDMDocument
+        result = doc.read()
+        
+        result_json = json.dumps(result, indent=4)
+        result_json_fname = ( Path(inp_mdd).parents[0] / '{basename}{ext}'.format(basename=Path(inp_mdd).name,ext='.json') if Path(inp_mdd).is_file() else re.sub(r'^\s*?(.*?)\s*?$',lambda m: '{base}{added}'.format(base=m[1],added='.json'),'{path}'.format(path=inp_mdd)) )
+        print('MDM read script: saving as "{fname}"'.format(fname=result_json_fname))
+        with open(result_json_fname, "w") as outfile:
+            outfile.write(result_json)
 
     time_finish = datetime.now()
     print('MDM read script: finished at {dt} (elapsed {duration})'.format(dt=time_finish,duration=time_finish-time_start))
