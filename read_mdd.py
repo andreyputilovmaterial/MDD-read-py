@@ -258,8 +258,7 @@ class MDMDocument:
                 item = fields[item_name]
                 result_item = {
                     **{
-                        'name': item_name,
-                        'fields': [],
+                        'name': item_name
                     },
                     **self.__read_mdm_item(item)
                 }
@@ -389,7 +388,7 @@ class MDMDocument:
             elif object_type_value==3:
                 # class (block)
                 result_item['attributes']['type'] = 'block'
-                result_item['attributes']['fields'] = []
+                #result_item['attributes']['fields'] = []
                 for cat in item.Fields:
                     #result_item['attributes']['fields'].append(self.__read_process_field(cat))
                     result_other_items = result_other_items + [ {**item,'name':'{prefix}.{part}'.format(prefix=item_name,part=item['name'])} for item in self.__read_process_field(cat) ]
