@@ -8,7 +8,7 @@ ECHO -
 ECHO 1. read
 ECHO read from: %MDD%
 ECHO write to: .json
-python MDD.py --mdd "%MDD%"
+python read_mdd.py --mdd "%MDD%"
 if %ERRORLEVEL% NEQ 0 ( echo ERROR: Failure && pause && exit /b %errorlevel% )
 
 ECHO -
