@@ -11,8 +11,6 @@ import json
 import win32com.client
 
 
-# # TODO:
-# import pdb
 
 
 
@@ -175,6 +173,7 @@ class MDMDocument:
                                 properties_list.append(prop_name)
                                 properties[prop_name] = '{value}'.format(value=item.Properties[prop_name])
                     document.Contexts.Current = context_preserve
+                    properties_list.sort()
                     for prop_name in properties_list:
                         result.append({ 'name': prop_name, 'value': properties[prop_name] })
             return result
@@ -216,7 +215,7 @@ class MDMDocument:
             fields = document.types
 
             sharedlists_list = [ '{slname}'.format(slname=slname.Name) for slname in fields ]
-            # TODO: sort
+            sharedlists_list.sort()
             for sl_name in sharedlists_list:
                 item = fields[sl_name]
                 result_item = {
@@ -253,7 +252,6 @@ class MDMDocument:
             fields = document.pages
 
             pages_list = [ '{name}'.format(name=slname.Name) for slname in fields ]
-            # TODO: sort
             for item_name in pages_list:
                 item = fields[item_name]
                 result_item = {
@@ -287,7 +285,6 @@ class MDMDocument:
             # config = self.__config
 
             fields_list = [ '{name}'.format(name=item.Name) for item in fields ]
-            # TODO: sort
             for item_name in fields_list:
                 try:
                     item = fields[item_name]
@@ -482,12 +479,12 @@ class MDMDocument:
                                 properties_list.append(prop_name)
                                 properties[prop_name] = '{value}'.format(value=item.Properties[prop_name])
                     document.Contexts.Current = context_preserve
+                    properties_list.sort()
                     for prop_name in properties_list:
                         result_properties.append({ 'name': prop_name, 'value': properties[prop_name] })
                     result[read_feature] = result_properties
                 elif read_feature=='scripting':
                     #val_label = '{val}'.format(val=item.Script)
-                    # TODO:
                     val_label = '{val}'.format(val='???')
                     try:
                         val_label = '{val}'.format(val=item.Script)
