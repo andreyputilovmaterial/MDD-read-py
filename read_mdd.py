@@ -135,7 +135,7 @@ class MDMDocument:
                 'flags': flags_list
             },
             'sections': [
-                { 'name': 'mdmproperties', 'content': [{'name':'MDM','properties':self.__read_properties()}] },
+                { 'name': 'mdmproperties', 'content': [{'name':'MDM','properties':self.__read_mdm_item_properties(self.__document)}] },
                 { 'name': 'languages', 'content': self.__read_languages() },
                 { 'name': 'shared_lists', 'content': self.__read_sharedlists() },
                 { 'name': 'fields', 'content': self.__read_fields(self.__document.Fields) },
@@ -144,43 +144,6 @@ class MDMDocument:
             ],
         }
         return result
-    
-    # and individual methods to follow: to read through all properties, all shared lists, all fields, categories, pages, etc...
-    def __read_properties(self):
-        
-        try:
-
-            result = []
-
-            config = self.__config
-            document = self.__document
-
-            for read_feature in config['features']:
-                if read_feature=='label':
-                    pass
-                elif read_feature=='attributes':
-                    pass
-                elif read_feature=='properties':
-                    item = document
-                    context_preserve = document.Contexts.Current
-                    properties_list = []
-                    properties = {}
-                    for read_context in document.Contexts:
-                        if '{ctx}'.format(ctx=read_context).lower() in [ctx.lower() for ctx in config['contexts']]:
-                            document.Contexts.Current = read_context
-                            for index_prop in range( 0, item.Properties.Count ):
-                                prop_name = '{name}'.format(name=item.Properties.Name(index_prop))
-                                properties_list.append(prop_name)
-                                properties[prop_name] = '{value}'.format(value=item.Properties[prop_name])
-                    document.Contexts.Current = context_preserve
-                    properties_list.sort()
-                    for prop_name in properties_list:
-                        result.append({ 'name': prop_name, 'value': properties[prop_name] })
-            return result
-        
-        except Exception as e:
-            print('failed when processing properties')
-            raise e
     
     def __read_languages(self):
 
@@ -434,7 +397,60 @@ class MDMDocument:
         except Exception as e:
             print('failed when processing routing')
             raise e
+    
+    def __read_mdm_item_properties(self,item):
+
+        try:
+            
+            document = self.__document
+            result_properties = []
+            context_preserve = document.Contexts.Current
+            properties_list = []
+            properties = {}
+            for read_context in document.Contexts:
+                if '{ctx}'.format(ctx=read_context).lower() in [ctx.lower() for ctx in config['contexts']]:
+                    document.Contexts.Current = read_context
+                    for index_prop in range( 0, item.Properties.Count ):
+                        prop_name = '{name}'.format(name=item.Properties.Name(index_prop))
+                        properties_list.append(prop_name)
+                        value_sanitized = '{value}'.format(value=item.Properties[prop_name])
+                        # checking for duplicates
+                        if not(prop_name in properties):
+                            # if not found, all good, we set the value
+                            properties[prop_name] = value_sanitized
+                        else:
+                            # else, if it exists in a different context, we check if it's the same value
+                            if properties[prop_name] == value_sanitized:
+                                pass # all good
+                            else:
+                                # if it's a different value (which should never happen)
+                                # we add it along with specification of context name
+                                # i.e. first value from "Analisis" context will be simply "ShortName"
+                                # and we'll add "ShortName (Question)" from "Question" context
+                                # it is tested, it is working, but per my understanding this should never happen
+                                prop_name_copy = '{name_orig} ({details_added})'.format(name_orig=prop_name,details_added=read_context.Name)
+                                properties_list.append(prop_name_copy)
+                                properties[prop_name_copy] = value_sanitized
+            document.Contexts.Current = context_preserve
+            # remove duplicates
+            properties_list = list(set(properties_list))
+            # and sort
+            properties_list.sort()
+            # and return in final format - a list of {name,value} dicts
+            for prop_name in properties_list:
+                result_properties.append({ 'name': prop_name, 'value': properties[prop_name] })
+            return result_properties
         
+        except Exception as e:
+            itemname = '{n}'.format(n=item)
+            try:
+                itemname = item.Name
+            except:
+                pass
+            print('failed when making a list of properties of {itemname}'.format(itemname=itemname))
+            raise e
+
+    
     def __read_mdm_item(self,item):
 
         item_name = '{name}'.format(name=item.Name)
@@ -446,7 +462,7 @@ class MDMDocument:
             }
 
             config = self.__config
-            document = self.__document
+            #document = self.__document
 
             for read_feature in config['features']:
                 if read_feature=='label':
@@ -467,22 +483,7 @@ class MDMDocument:
                             val_label = '{val}'.format(val=e)
                         result['langcode-{langcode}'.format(langcode=langcode)] = val_label
                 elif read_feature=='properties':
-                    result_properties = []
-                    context_preserve = document.Contexts.Current
-                    properties_list = []
-                    properties = {}
-                    for read_context in document.Contexts:
-                        if '{ctx}'.format(ctx=read_context).lower() in [ctx.lower() for ctx in config['contexts']]:
-                            document.Contexts.Current = read_context
-                            for index_prop in range( 0, item.Properties.Count ):
-                                prop_name = '{name}'.format(name=item.Properties.Name(index_prop))
-                                properties_list.append(prop_name)
-                                properties[prop_name] = '{value}'.format(value=item.Properties[prop_name])
-                    document.Contexts.Current = context_preserve
-                    properties_list.sort()
-                    for prop_name in properties_list:
-                        result_properties.append({ 'name': prop_name, 'value': properties[prop_name] })
-                    result[read_feature] = result_properties
+                    result[read_feature] = self.__read_mdm_item_properties(item)
                 elif read_feature=='scripting':
                     #val_label = '{val}'.format(val=item.Script)
                     val_label = '{val}'.format(val='???')
